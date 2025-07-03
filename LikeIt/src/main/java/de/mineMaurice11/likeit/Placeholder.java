@@ -38,12 +38,18 @@ public class Placeholder extends PlaceholderExpansion {
     public String onPlaceholderRequest(Player p, String identifier) {
         if (p == null) return "";
 
-        // singsLeft Placeholder
+        // singsLeft
     	if (identifier.equals("signsleft")) {
         	int signsLeft = likeitplugin.getAmountSignsLeft(p);
         	return Integer.toString(signsLeft);
         }
-
+    	
+    	// givenLikes
+    	if (identifier.equals("givenlikes")) {
+        	int givenLikes = likeitplugin.getGivenLikes(p);
+        	return Integer.toString(givenLikes);
+        }
+    	
         return null;
     }
 }

@@ -51,6 +51,9 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
     private File playerDataFile;    
     private YamlConfiguration playerData;
     
+    //Messages
+    private String msg_prefix = "§8[§7LikeIt§8] ";
+    
 
     
     @Override
@@ -158,8 +161,12 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
         sign.update();
     }
     
-    public void playLikeSound(Player player) {
+    public void playLikeSound(Player player, Player owner) {
+    	//Liking Player
         player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_TWINKLE, 1.0f, 1.0f);
+        
+        //Player who gets liked
+        owner.playSound(owner.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
     }
     
     @EventHandler
@@ -169,10 +176,32 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
     	//update beim joinen
     	//maxSigns
     	setMaxSignUse(p);
-    	p.sendMessage("maxSignUse geupdatet!");
+    	
+    	// update givenLikes
+    	setGivenLikes(p, -1);
     }
     
-    @EventHandler
+    private void setGivenLikes(Player p, int amount) {
+    	//get given Likes. Wenn keine vorhanden, dann 0 :)
+    	int givenLikes = playerData.getInt(p.getUniqueId().toString() + ".givenLikes", 0);
+    	
+    	if(amount == -1) {
+    		//Player Join Event
+    		//Init given Likes zu Wert welcher gespeichert ist, oder 0
+    		
+    		playerData.set(p.getUniqueId().toString() + ".givenLikes", givenLikes);
+    		
+    	}else {
+    		givenLikes += amount;
+    		playerData.set(p.getUniqueId().toString() + ".givenLikes", givenLikes);    		
+    	}		
+	}
+    
+    public int getGivenLikes(Player p) {
+    	return playerData.getInt(p.getUniqueId().toString() + ".givenLikes", 0);
+    }
+
+	@EventHandler
     public void onSignChange(SignChangeEvent event) {
     	Player p = event.getPlayer();
     	
@@ -205,11 +234,11 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
             event.setLine(2, "§2" + currentLikes);
             event.setLine(3, "§2Likes");
             
-            
+            // Default values
             // signsData.yml
             signsData.set(locStr + ".owner", p.getUniqueId().toString());
             signsData.set(locStr + ".clickedBy", new ArrayList<String>());
-            signsData.set(locStr + ".likes", 0);
+            signsData.set(locStr + ".likes", 0);           
             
             successfulSignUse(p);
             saveData();
@@ -218,7 +247,7 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
             container.set(key, PersistentDataType.BYTE, (byte) 1);
             sign.update();
 
-            p.sendMessage("§aLike-Schild erstellt! Spieler können dir jetzt Likes geben.");
+            p.sendMessage(msg_prefix + "§aLike-Schild erstellt! Spieler können dir jetzt Likes geben.");
             
         }
     }
@@ -232,6 +261,9 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
         usedSigns += 1;
         playerData.set(p.getUniqueId().toString() + ".usedSigns", usedSigns);
         saveData();
+        
+        //Update Likes gives
+        
         
         getAmountSignsLeft(p);
     }
@@ -278,7 +310,7 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
      * 
      */
     @EventHandler
-    public void onPlayerInteract(PlayerInteractEvent event) {
+    public void onPlayerSignInteract(PlayerInteractEvent event) {
         if (event.getClickedBlock() == null) return;
         
         // nur Rechtsklick erlauben
@@ -317,7 +349,7 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
         	return;
         }
 
-        event.setCancelled(true);
+        event.setCancelled(true); // ????
         Player clicker = event.getPlayer();
 
         Location signLoc = sign.getLocation();
@@ -348,12 +380,16 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
         //Player Messages after LIKE
         Player ownerPlayer = Bukkit.getPlayer(ownerUUID);
         
-        econ.depositPlayer(ownerPlayer, likeAmount);
-        clicker.sendMessage("§aDu hast " + ownerPlayer.getName() + " ein Like gegeben!");
+        //
+        // getLikeAmount() später
+        // actualLikeAmount = 
+        //
         
-        if (ownerPlayer != null && ownerPlayer.isOnline()) {
-            ownerPlayer.sendMessage("§eDu hast 1 Like von " + clicker.getName() + " bekommen!");
-        }
+        //do Economy and message stuff
+        likeAction(clicker, ownerPlayer, likeAmount);
+        
+        //update givenLikes
+        setGivenLikes(clicker, likeAmount);
         
         //signsData
         clickedBy.add(clickerUUID.toString());
@@ -369,7 +405,19 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
         updateLikesOnSign(sign, currentLikes, clicker);
         
         //Play Sound when LIKE
-        playLikeSound(clicker);
+        playLikeSound(clicker, ownerPlayer);
+    }
+    
+    public void likeAction(Player clicker, Player owner, int likeAmount) {
+    	
+    	//Economy give Like
+    	econ.depositPlayer(owner, likeAmount);
+        clicker.sendMessage("§aDu hast " + likeAmount + " Like an " + owner.getName() + " gegeben. Danke!");
+        
+        //owner recieves Like
+        if (owner != null && owner.isOnline()) {
+            owner.sendMessage("§eDu hast " + likeAmount + " Like von " + clicker.getName() + " bekommen!");
+        }    	
     }
     
     @EventHandler
