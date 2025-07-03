@@ -8,10 +8,8 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.BlockState;
-import org.bukkit.block.HangingSign;
 import org.bukkit.block.Sign;
 import org.bukkit.block.data.BlockData;
-import org.bukkit.block.data.type.WallHangingSign;
 import org.bukkit.block.data.type.WallSign;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -20,8 +18,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.SignChangeEvent;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -33,7 +31,7 @@ import java.io.IOException;
 import java.util.*;
 
 public class LikeItPlugin extends JavaPlugin implements Listener {
-
+	
 	private static LikeItPlugin instance;
 	
     private Economy econ;
@@ -41,9 +39,10 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
     //signsData
     private int likeAmount;
     private boolean allowSelfLike;
+    private int maxSigns;
     
     //playerData
-    private int maxSigns;
+    
 
     //YML
     private File signsDataFile;
@@ -64,9 +63,10 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
     	//signsData        
         likeAmount = getConfig().getInt("likeAmount", 1);
         allowSelfLike = getConfig().getBoolean("allow-self-like", false);
+        maxSigns = getConfig().getInt("maxSigns", 3);
         
         //playerData
-        maxSigns = getConfig().getInt("maxSigns", 3);
+        
         
         //CONFIG END
         
@@ -75,6 +75,12 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
             getLogger().severe("Vault/Economy nicht gefunden – Plugin deaktiviert!");
             getServer().getPluginManager().disablePlugin(this);
             return;
+        }
+        //Placeholder Check
+        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            new Placeholder(this, this).register();
+        } else {
+            getLogger().warning("PlaceholderAPI nicht gefunden!");
         }
 
         loadData();
@@ -141,7 +147,7 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
         return instance;
     }
     
-    public void updateLikes(Sign sign, int currentLikes, Player p) {
+    public void updateLikesOnSign(Sign sign, int currentLikes, Player p) {
     	
     	sign.setLine(2, "§2" + currentLikes);
         if(currentLikes == 1) {
@@ -157,6 +163,16 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
     }
     
     @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+    	Player p = event.getPlayer();
+    	
+    	//update beim joinen
+    	//maxSigns
+    	setMaxSignUse(p);
+    	p.sendMessage("maxSignUse geupdatet!");
+    }
+    
+    @EventHandler
     public void onSignChange(SignChangeEvent event) {
     	Player p = event.getPlayer();
     	
@@ -166,6 +182,13 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
     	
         // Keine Bearbeitung wenn schon LikeSign
         if (container.has(key, PersistentDataType.BYTE)) return;
+        
+        //Limitierung mit singsLeft
+        int signsLeft = getAmountSignsLeft(p);
+        if(signsLeft <= 0) {
+        	p.sendMessage("Du hast alle verfügbaren Like-Schilder verwendet. Du kannst bestehende Schilder umplatzieren.");
+        	return;
+        }
         
         // Falls richtig [Like], speichern und Flag setzen
         if (event.getLine(0).equalsIgnoreCase("[Like]")) {
@@ -188,10 +211,10 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
             signsData.set(locStr + ".clickedBy", new ArrayList<String>());
             signsData.set(locStr + ".likes", 0);
             
-            signUse(p);
+            successfulSignUse(p);
             saveData();
             
-            // flag: Like-Schild gesetzt
+            // SET FLAG: Like-Schild gesetzt
             container.set(key, PersistentDataType.BYTE, (byte) 1);
             sign.update();
 
@@ -200,20 +223,34 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
         }
     }
     
-    public void signUse(Player p) {
+    public void successfulSignUse(Player p) {
+    	// updated max SignUse
+    	setMaxSignUse(p);    	
     	
+    	// Update Use
     	int usedSigns = playerData.getInt(p.getUniqueId().toString() + ".usedSigns", 0);
-    	int maxSigns = playerData.getInt(p.getUniqueId().toString() + ".maxSigns", 3);
-    	    	
-        // playerData.yml
         usedSigns += 1;
         playerData.set(p.getUniqueId().toString() + ".usedSigns", usedSigns);
-        playerData.set(p.getUniqueId().toString() + ".maxSigns", 3);
+        saveData();
         
-        //signs left
-        int signsLeft = maxSigns - usedSigns;
-        
-        p.sendMessage("Schilder übrig: " + signsLeft);
+        getAmountSignsLeft(p);
+    }
+    
+    public void setMaxSignUse(Player p) {
+    	//Initalwert aus Config
+    	playerData.set(p.getUniqueId().toString() + ".maxSigns", maxSigns); //maxSigns aus Config ;)
+    	saveData();
+    	
+    }
+    
+    public int getAmountSignsLeft(Player p) {
+    	int usedSigns = playerData.getInt(p.getUniqueId().toString() + ".usedSigns", 0);
+    	int maxSigns = playerData.getInt(p.getUniqueId().toString() + ".maxSigns", 3);
+    	
+    	int signsLeft = maxSigns - usedSigns;
+    	//p.sendMessage("Schilder übrig: " + signsLeft); //überflüssig, wenn im scoreboard angezeigt
+    	
+    	return signsLeft;
     }
     
     public void signBreak(String locStr) {
@@ -223,13 +260,16 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
         
         Player p = Bukkit.getPlayer(ownerUUID);
         
+        // recover USe
         int usedSigns = playerData.getInt(p.getUniqueId().toString() + ".usedSigns", 0);
         usedSigns += -1;
         playerData.set(p.getUniqueId().toString() + ".usedSigns", usedSigns);
         
-        
-	     // Gespeicherte Like-Daten löschen
+	    // Gespeicherte Like-Daten löschen
         signsData.set(locStr, null);
+        
+        // signs left
+        getAmountSignsLeft(p);
     }
     
 
@@ -241,25 +281,29 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
     public void onPlayerInteract(PlayerInteractEvent event) {
         if (event.getClickedBlock() == null) return;
         
-        // nur Rechtsklick
+        // nur Rechtsklick erlauben
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return; 
         
-        // Schild (-material) check
+        
+        /* Schild (-material) check
+         * 12 Materials mit je 4 Ausführungen
+         */
         Material mat = event.getClickedBlock().getType();
         if (mat != Material.OAK_SIGN && mat != Material.OAK_WALL_SIGN && mat != Material.OAK_HANGING_SIGN && mat != Material.OAK_WALL_HANGING_SIGN && 
             mat != Material.SPRUCE_SIGN && mat != Material.SPRUCE_WALL_SIGN && mat != Material.SPRUCE_HANGING_SIGN && mat != Material.SPRUCE_WALL_HANGING_SIGN &&
             mat != Material.BIRCH_SIGN && mat != Material.BIRCH_WALL_SIGN && mat != Material.BIRCH_HANGING_SIGN && mat != Material.BIRCH_WALL_HANGING_SIGN &&
             mat != Material.JUNGLE_SIGN && mat != Material.JUNGLE_WALL_SIGN && mat != Material.JUNGLE_HANGING_SIGN && mat != Material.JUNGLE_WALL_HANGING_SIGN &&
             mat != Material.ACACIA_SIGN && mat != Material.ACACIA_WALL_SIGN && mat != Material.ACACIA_HANGING_SIGN && mat != Material.ACACIA_WALL_HANGING_SIGN &&
-            mat != Material.DARK_OAK_SIGN && mat != Material.DARK_OAK_WALL_SIGN &&
-            mat != Material.MANGROVE_SIGN && mat != Material.MANGROVE_WALL_SIGN &&
-            mat != Material.CHERRY_SIGN && mat != Material.CHERRY_WALL_SIGN &&
-    		mat != Material.PALE_OAK_SIGN && mat != Material.PALE_OAK_WALL_SIGN &&
-			mat != Material.BAMBOO_SIGN && mat != Material.BAMBOO_WALL_SIGN &&
-			mat != Material.CRIMSON_SIGN && mat != Material.CRIMSON_WALL_SIGN &&
-            mat != Material.WARPED_SIGN &&  mat != Material.WARPED_WALL_SIGN) return;
+            mat != Material.DARK_OAK_SIGN && mat != Material.DARK_OAK_WALL_SIGN && mat != Material.DARK_OAK_HANGING_SIGN && mat != Material.DARK_OAK_WALL_HANGING_SIGN &&
+            mat != Material.MANGROVE_SIGN && mat != Material.MANGROVE_WALL_SIGN && mat != Material.MANGROVE_HANGING_SIGN && mat != Material.MANGROVE_WALL_HANGING_SIGN &&
+            mat != Material.CHERRY_SIGN && mat != Material.CHERRY_WALL_SIGN && mat != Material.CHERRY_HANGING_SIGN && mat != Material.CHERRY_WALL_HANGING_SIGN &&
+    		mat != Material.PALE_OAK_SIGN && mat != Material.PALE_OAK_WALL_SIGN && mat != Material.PALE_OAK_HANGING_SIGN && mat != Material.PALE_OAK_WALL_HANGING_SIGN &&
+			mat != Material.BAMBOO_SIGN && mat != Material.BAMBOO_WALL_SIGN && mat != Material.BAMBOO_HANGING_SIGN && mat != Material.BAMBOO_WALL_HANGING_SIGN &&
+			mat != Material.CRIMSON_SIGN && mat != Material.CRIMSON_WALL_SIGN && mat != Material.CRIMSON_HANGING_SIGN && mat != Material.CRIMSON_WALL_HANGING_SIGN &&
+            mat != Material.WARPED_SIGN &&  mat != Material.WARPED_WALL_SIGN && mat != Material.WARPED_HANGING_SIGN &&  mat != Material.WARPED_WALL_HANGING_SIGN) return;
         
-        if (!(event.getClickedBlock().getState() instanceof Sign)) return;
+        BlockState clickedBlock = event.getClickedBlock().getState();
+        if (!(clickedBlock instanceof Sign)) return; 					//Wall- und Hanging-Signs müssen nicht extra behandelt werden, sind auch typ sign
         Sign sign = (Sign) event.getClickedBlock().getState();
         
         // Check ob LIKE richtig geschrieben NOTWENDIG?
@@ -322,7 +366,7 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
         saveData();
         
         //Update Text on signs
-        updateLikes(sign, currentLikes, clicker);
+        updateLikesOnSign(sign, currentLikes, clicker);
         
         //Play Sound when LIKE
         playLikeSound(clicker);
@@ -385,36 +429,56 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
                 NamespacedKey key = new NamespacedKey(getInstance(), "likeSign");
                 if (!container.has(key, PersistentDataType.BYTE)) return;
                 
-                getLogger().info(face.toString()+" ");
+                //Display facing. where neighbor is
+                //getLogger().info(face.toString()+" ");
             	
-                //Block-Art
-            	if(data instanceof WallSign wallSign) {
-            		BlockFace attachedFace = wallSign.getFacing(); // BlockFace des Schilds
-
-            	    if (attachedFace.equals(face)) {
-            	        // Der zerstörte Block ist die Rückwand dieses Schilds
-            	        event.setCancelled(true);
-            	        event.getPlayer().sendMessage("Du kannst dieses Schild nicht indirekt zerstören.");
-            	        return;
-            	    }
-            	}else if(data instanceof HangingSign hangingSign){
-            		if(face == BlockFace.DOWN){
-            			event.setCancelled(true);
-            	        event.getPlayer().sendMessage("Du kannst dieses Schild nicht indirekt zerstören.");
-            	        return;
-            		}
-            	}else{            		
-            		if(face == BlockFace.UP){
-            			event.setCancelled(true);
-            	        event.getPlayer().sendMessage("Du kannst dieses Schild nicht indirekt zerstören.");
-            	        return;
-            		}
-            	}
-
+                /*Unterschiedung nach Blocktype
+                 * WallSign
+                 * HangingSign
+                 * WallHangingSign
+                 * stehendes Schild (kein eigener Typ)
+                 */
+                String signType = switch (data){                
+	                case WallSign ignored -> "WALL_SIGN";
+	                case org.bukkit.block.data.type.HangingSign ignored -> "HANGING_SIGN";
+	                case org.bukkit.block.data.type.WallHangingSign ignored -> "WALL_HANGING_SIGN";
+	                default -> "STANDING_SIGN";                            	
+                };
                 
+                switch(signType) {
+	                case "WALL_SIGN" -> {
+	                	BlockFace attachedFace = ((WallSign) data).getFacing(); // BlockFace des Schilds
+	            	    if (attachedFace.equals(face)) {
+	            	        // Der zerstörte Block ist die Rückwand dieses Schilds
+	            	        cancelBlockBreakNearSign(event);
+	            	        return;
+	            	    }
+	                }	                
+	                case "HANGING_SIGN" -> {
+	                	if (face == BlockFace.DOWN) {
+	                		cancelBlockBreakNearSign(event);
+	                        return;
+	                    }
+	                }
+	                case "WALL_HANGING_SIGN" -> {
+	                	// do nothing, block does not drop :)
+	                    return;
+	                }
+	                case "STANDING_SIGN" -> {
+	                	if (face == BlockFace.UP) {
+	                		cancelBlockBreakNearSign(event);
+	                        return;
+	                    }
+	                }
+                }                
             }
         }
 
-        // Wenn kein Schild in der Nähe war → Abbau erlaubt
+        // kein Schild in der Nähe: Abbau erlaubt
+    }
+    
+    public void cancelBlockBreakNearSign(BlockBreakEvent event) {
+    	event.setCancelled(true);
+        event.getPlayer().sendMessage("Du kannst dieses Schild nicht indirekt zerstören.");
     }
 }
