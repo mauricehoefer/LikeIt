@@ -1,0 +1,5 @@
+name: LikeIt
+main: de.mineMaurice11.likeit.LikeItPlugin
+version: 1.0
+api-version: "1.21"
+depend: [Vault, Essentials]
