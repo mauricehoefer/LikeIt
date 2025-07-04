@@ -1,7 +1,5 @@
 package de.mineMaurice11.likeit;
 
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
 import net.milkbowl.vault.economy.Economy;
 
 import org.bukkit.Bukkit;
@@ -14,8 +12,6 @@ import org.bukkit.block.BlockState;
 import org.bukkit.block.Sign;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.type.WallSign;
-import org.bukkit.block.sign.Side;
-import org.bukkit.block.sign.SignSide;
 import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -46,6 +42,8 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
     private int likeAmount;
     private boolean allowSelfLike;
     private int maxSigns;
+    private boolean allowFastPlacement;
+    private int placementCooldown;
     
     //YAML
     private File UPlayerDataFile;
@@ -78,12 +76,12 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
 
         Bukkit.getPluginManager().registerEvents(this, this);
         
-        logToConsole("    (  \\");
-        logToConsole("     \\  \\  __");
-        logToConsole("  (___)   |");
-        logToConsole(" (___)|   |  LikeIt-Plugin");
-        logToConsole("  (___) __|    aktiviert.");
-        logToConsole("   (__)__ |__");
+        logToConsole("§2    (  \\");
+        logToConsole("§2     \\  \\  __");
+        logToConsole("§2  (___)   |");
+        logToConsole("§2 (___)|   |  LikeIt-Plugin");
+        logToConsole("§2  (___) __|    aktiviert.");
+        logToConsole("§2   (__)__ |__");
     }
 
 	private static LikeItPlugin getInstance() {
@@ -97,10 +95,12 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
 		//Data       
         likeAmount = getConfig().getInt("likeAmount", 1);
         allowSelfLike = getConfig().getBoolean("allow-self-like", false);
-        maxSigns = getConfig().getInt("maxSigns", 3);		
+        maxSigns = getConfig().getInt("maxSigns", 3);	
+        allowFastPlacement = getConfig().getBoolean("allow-fast-placement", false);
+        placementCooldown = getConfig().getInt("placement-cooldown", 5);
 	}
 
-	//Methode zum Prüfen, ob Eco-Plugin existiert
+	//Methode zum Prüfen, ob Economy-Plugin existiert
     private boolean setupEconomy() {
         RegisteredServiceProvider<Economy> rsp = getServer()
                 .getServicesManager()
@@ -170,6 +170,7 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
         }
         sign.update();
     }
+
 
     private void deleteSignData(Sign sign) {
 		//get owner
@@ -336,6 +337,23 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
 	    logToConsole(clicker.getName() + " gave " + owner.getName() + " " + likeAmount + " Like.");
 	}
 
+	private void setLastSignTime(Player p) {
+		File file = new File(new File(getDataFolder(), "playerData"), p.getUniqueId() + ".yml");
+	    YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
+	    
+	    //get current time
+	    long lastSignTime = System.currentTimeMillis(); 
+	    
+	    //set       
+	    config.set("lastSignTime", lastSignTime);
+	    try {
+	        config.save(file);
+	        logToConsole("setLastSignTime()");
+	    } catch (IOException e) {
+	        e.printStackTrace();
+	    }			
+	}
+
 	protected int getGivenLikes(Player p) {
 		File file = new File(new File(getDataFolder(), "playerData"), p.getUniqueId().toString() + ".yml");
 	    YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
@@ -389,6 +407,14 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
 	   	return likes;		
 	}
 
+	private long getLastSignTime(Player p) {
+		File file = new File(new File(getDataFolder(), "playerData"), p.getUniqueId().toString() + ".yml");
+	    YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
+	    //get
+	    long lastSignTime = config.getLong("lastSignTime");
+	   	return lastSignTime;
+	}
+
 	private boolean hasFlag(Sign sign, String flag) {
     	PersistentDataContainer container = sign.getPersistentDataContainer();
         NamespacedKey key = new NamespacedKey(getInstance(), flag);
@@ -408,7 +434,39 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
     }
     
 
-    @EventHandler
+    private boolean allowFastPlacement(Player p) {
+		if(!allowFastPlacement) {
+			long lastSignTime = getLastSignTime(p);
+			long currentTime = System.currentTimeMillis();
+			
+			//calculate difference
+			long timeDifference = currentTime - lastSignTime;
+			long timeDifferenceSeconds = timeDifference/1000;
+			long timeDifferenceMinutes = timeDifferenceSeconds/60;
+			
+			logToConsole("Secondes: " + String.valueOf(timeDifferenceSeconds));
+			logToConsole("Minutes: " + String.valueOf(timeDifferenceMinutes));
+			
+			if(timeDifferenceMinutes >= placementCooldown) {
+				return true;
+			}else {
+				
+				long timeLeft = placementCooldown - timeDifferenceMinutes;
+				
+				if(timeLeft > 1) {
+					p.sendMessage(msg_prefix + "§eBitte warte noch " + timeLeft + " Minuten, um ein neues Like-Schild zu platzieren.");
+				}else {
+					timeLeft = (placementCooldown*60)-timeDifferenceSeconds;
+					p.sendMessage(msg_prefix + "§eBitte warte noch " + timeLeft + " Sekunden, um ein neues Like-Schild zu platzieren.");
+				}
+				
+				return false;
+			}
+		}
+		return true;
+	}
+
+	@EventHandler
 	public void onPlayerJoin(PlayerJoinEvent event) {
 		Player p = event.getPlayer();
 		//existiert eine Player datei?
@@ -445,6 +503,9 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
 	    // Falls richtig [Like], speichern und Flag setzen
 	    if (event.getLine(0).equalsIgnoreCase("[Like]")) {
 	    	
+	    	//Limitierung fastPlacement
+		    if(!allowFastPlacement(p)) return;
+	    	
 	    	//Set FLAGS
 	        setFlags(p, sign);
 	        
@@ -460,6 +521,7 @@ public class LikeItPlugin extends JavaPlugin implements Listener {
 	        event.setLine(3, "§2Likes");
 	        
 	        //UPDATES
+	        setLastSignTime(p);
 	        setSignData(sign);        	
 	        setMaxSignUse(p);            	
 	        setUsedSigns(p,1);            

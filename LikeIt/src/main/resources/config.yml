@@ -1,3 +1,28 @@
+############################################################
+#    (  \                                                  #
+#     \  \  __                                             #
+#  (___)   |       Config-file for LikeIt                  #
+# (___)|   |            version 1.0                        #
+#  (___) __|                                               #
+#   (__)__ |__                                             #
+############################################################
+
+##### Economy #####
+
+# Set the amout per sign use, which will be added to your balance.
 likeAmount: 1
+
+
+##### Sign Use #####
+
+# Set this to true, when player should like thier own sign
 allow-self-like: true
+
+# Set the maximum of active signs
 maxSigns: 3
+
+# Enable to force player to wait before placing the next sign 
+allow-fast-placement: false
+
+# Set the delay, in minutes, which players have to wait. (allow-fast-placement: false)
+placement-cooldown: 1
